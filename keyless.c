@@ -91,7 +91,7 @@ const char *error_string(int e)
 
 // This structure is used to store a private key and the SHA256 hash
 // of the modulus of the public key which it is associated with.
-pk_list privates = 0;
+pk_list privates = 0;        /* 托管的私钥列表 */
 char *pk_dir = NULL;
 uv_rwlock_t *pk_lock;
 SSL_CTX *g_ctx;
@@ -161,8 +161,7 @@ static void load_private_keys(SSL_CTX *ctx)
     g.gl_pathc  = 0;
     g.gl_offs   = 0;
 
-    rc = glob(pattern, GLOB_NOSORT, 0, &g);
-
+    rc = glob(pattern, GLOB_NOSORT, 0, &g);    /* 匹配规则，查找私钥文件 */
     if (rc != 0) {
         SSL_CTX_free(ctx);
         fatal_error("Error %d finding private keys in %s", rc, pk_dir);
@@ -183,7 +182,7 @@ static void load_private_keys(SSL_CTX *ctx)
     for (i = 0; i < privates_count; ++i) {
         write_log(0, "loading key: %s", g.gl_pathv[i]);
         if (add_key_from_file(g.gl_pathv[i], privates) != 0) {
-            SSL_CTX_free(ctx);
+            SSL_CTX_free(ctx);                 /* 加载私钥 */
             fatal_error("Failed to add private keys");
         }
     }
@@ -196,10 +195,9 @@ static void load_private_keys(SSL_CTX *ctx)
 }
 
 // This defines the maximum number of workers to create
-
+/* 支持多线程模型 */
 #define DEFAULT_WORKERS 1
 #define MAX_WORKERS 32
-
 int num_workers = DEFAULT_WORKERS;
 
 worker_data worker[MAX_WORKERS];
@@ -328,7 +326,6 @@ int get_handle(uv_loop_t *loop, uv_tcp_t *server)
                   error_string(rc));
         return 1;
     }
-
     client->pipe.data = (void *)client;
     uv_pipe_connect(&client->connect_req, &client->pipe,
                     PIPE_NAME, ipc_connect_cb);
@@ -340,6 +337,7 @@ int get_handle(uv_loop_t *loop, uv_tcp_t *server)
 // thread_entry: starts a new thread and begins listening for
 // connections. Before listening it obtains the server handle from
 // the main thread.
+/* 工作线程入口函数 */
 void thread_entry(void *data)
 {
     worker_data *worker = (worker_data *)data;
@@ -349,10 +347,9 @@ void thread_entry(void *data)
     // The stopper is used to terminate the thread gracefully. The
     // uv_unref is here so that if the thread has terminated the
     // async event doesn't keep the loop alive.
-
     worker->stopper.data = (void *)worker;
     rc = uv_async_init(loop, &worker->stopper, thread_stop_cb);
-    if (rc != 0) {
+    if (rc != 0) {                    /* 线程退出异步函数 */
         write_log(1, "Failed to create async in thread: %s",
                   error_string(rc));
         uv_loop_delete(loop);
@@ -362,10 +359,9 @@ void thread_entry(void *data)
 
     // Wait for the main thread to be ready and obtain the
     // server handle
-
-    uv_sem_wait(&worker->semaphore);
+    uv_sem_wait(&worker->semaphore);  /* 等待主线程，wait1 */
     rc = get_handle(loop, &worker->server);
-    uv_sem_post(&worker->semaphore);
+    uv_sem_post(&worker->semaphore);  /* 已接收待监控句柄，通知主线程，wait2 */
 
     if (rc == 0) {
         worker->server.data = (void *)worker;
@@ -373,7 +369,7 @@ void thread_entry(void *data)
 
         rc = uv_listen((uv_stream_t *)&worker->server, SOMAXCONN,
                        new_connection_cb);
-        if (rc != 0) {
+        if (rc != 0) {                /* 监听客户端请求 */
             write_log(1, "Failed to listen on socket in thread: %s",
                       error_string(rc));
         }
@@ -531,21 +527,21 @@ void write_pid(char *pid_file, int pid, int write)
 /* 入口函数 */
 int main(int argc, char *argv[])
 {
-    int port = 2407;
+    int port = 2407;                  /* 监听端口 */
     int help = 0;
-    char *server_cert = 0;
+    char *server_cert = 0;            /* 用于认证客户端链接 */
     char *server_key = 0;
     char *private_key_directory = 0;
+    char *ca_file = 0;                /* 用于认证客户端链接上的请求 */
     const char *cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384";
-    const char *ec_curve_name = "prime256v1";
+    const char *ec_curve_name = "prime256v1";    /* <FIXME>具体什么含义??? */
 
-    char *ca_file = 0;
-    char *pid_file = 0;
+    char *pid_file = 0;               /* 记录进程PID的文件 */
     int parsed;
 
     const SSL_METHOD *method;
     SSL_CTX *ctx;
-#if !PLATFORM_WINDOWS
+#if !PLATFORM_WINDOWS                 /* 降权为指定的用户 */
     char *usergroup = 0;
     char *user = 0;
     char *group = 0;
@@ -569,7 +565,7 @@ int main(int argc, char *argv[])
     int test_mode = 0;
 
     const struct option long_options[] = {
-        {"port",                  required_argument, 0, 0},
+        {"port",                  required_argument, 0, 0},  /* 指定监听端口 */
         {"server-cert",           required_argument, 0, 1},
         {"server-key",            required_argument, 0, 2},
         {"private-key-directory", required_argument, 0, 3},
@@ -579,9 +575,9 @@ int main(int argc, char *argv[])
         {"pid-file",              required_argument, 0, 7},
         {"num-workers",           optional_argument, 0, 8},
         {"help",                  no_argument,       0, 9},
-        {"ip",                    required_argument, 0, 10},
+        {"ip",                    required_argument, 0, 10}, /* 指定监听IP */
 #if !PLATFORM_WINDOWS
-        {"user",                  required_argument, 0, 11},
+        {"user",                  required_argument, 0, 11}, /* 格式user:group, 运行降权 */
         {"daemon",                no_argument,       0, 12},
         {"syslog",                no_argument,       0, 13},
         {"version",               no_argument,       0, 14},
@@ -593,7 +589,6 @@ int main(int argc, char *argv[])
 
     // This is set up here because it may be overriden by the --ip option which
     // is about to be parsed. That option is optional and this sets the default.
-
     addr.sin_addr.s_addr = INADDR_ANY;
 
     parsed = 0;
@@ -712,7 +707,7 @@ int main(int argc, char *argv[])
 #endif
 
         case 14:
-            fatal_error("keyless: %s", KSSL_VERSION);
+            fatal_error("keyless: %s", KSSL_VERSION);  /* 此变量由Makefile动态生成 */
             break;
 
         case 15:
@@ -800,6 +795,7 @@ The following options are not available on Windows systems:\n\
 \n\
             Log lines are sent to syslog (instead of stdout or stderr).\n");
     }
+    /* <TAKECARE!!!>以下几个为必须指定的参数 */
     if (!server_cert) {
         fatal_error("The --server-cert parameter must be specified with the path to the server's SSL certificate");
     }
@@ -817,6 +813,7 @@ The following options are not available on Windows systems:\n\
     }
 
 #if !PLATFORM_WINDOWS
+    /* 记录进程PID */
     if (daemon && !test_mode) {
         int pid = fork();
         if (pid == -1) {
@@ -830,6 +827,7 @@ The following options are not available on Windows systems:\n\
         write_pid(pid_file, getpid(), !test_mode);
     }
 
+    /* 降权为指定用户 */
     if (usergroup != 0) {
         if (setgid(grp->gr_gid) == -1) {
             fatal_error("Failed to set group %d (%s)", grp->gr_gid, group);
@@ -845,13 +843,13 @@ The following options are not available on Windows systems:\n\
     write_pid(pid_file, getpid(), !test_mode);
 #endif
 
-    SSL_library_init();
-    SSL_load_error_strings();
+    /* SSL库初始化 */
+    SSL_library_init();           /* openssl库初始化，必须在所有其他库调用之前 */
+    SSL_load_error_strings();     /* 加载可读错误信息 */
     ERR_load_BIO_strings();
 
-    method = TLSv1_2_server_method();
+    method = TLSv1_2_server_method();  /* 仅支持TLSv1.2协议，并利用其构建框架，以建立TLS/SSL链接 */
     ctx = SSL_CTX_new(method);
-
     if (!ctx) {
         ssl_error();
     }
@@ -859,53 +857,49 @@ The following options are not available on Windows systems:\n\
     // Set the context to ask for a peer (i.e. client certificate on connection)
     // and to refuse connections that do not have a client certificate. The client
     // certificate must be signed by the CA in the --ca-file parameter.
-
     if (SSL_CTX_set_cipher_list(ctx, cipher_list) == 0) {
-        SSL_CTX_free(ctx);
+        SSL_CTX_free(ctx);             /* 选择链路协商加密算法套件 */
         fatal_error("Failed to set cipher list %s", cipher_list);
     }
 
     int nid = OBJ_sn2nid(ec_curve_name);
-    if (NID_undef == nid) {
+    if (NID_undef == nid) {            /* 查找object，并依据它创建临时公钥，并设置到当前的SSL环境 */
         SSL_CTX_free(ctx);
         fatal_error("ECDSA curve not present");
     }
-
     EC_KEY *ecdh = EC_KEY_new_by_curve_name(nid);
     if (NULL == ecdh) {
         SSL_CTX_free(ctx);
         fatal_error("ECDSA new curve error");
     }
-
     if(SSL_CTX_set_tmp_ecdh(ctx, ecdh) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Call to SSL_CTX_set_tmp_ecdh failed");
     }
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, 0);
+                                       /* 要求客户端认证；如果客户端未返回certificate，TLS/SSL握手立即结束，并返回消息"handshake failure" */
 
     cert_names = SSL_load_client_CA_file(ca_file);
-    if (!cert_names) {
-        SSL_CTX_free(ctx);
+    if (!cert_names) {                 /* 读取文件获取CA列表，此列表在请求客户端认证时发送过去 */
+        SSL_CTX_free(ctx);             /* reads a file of PEM formatted certificates and extracts the X509_NAMES of the certificates found */
         fatal_error("Failed to load CA file %s", ca_file);
     }
-
     SSL_CTX_set_client_CA_list(ctx, cert_names);
+                                       /* sets the list of CAs sent to the client when requesting a client certificate */
 
     if (SSL_CTX_load_verify_locations(ctx, ca_file, 0) != 1) {
-        SSL_CTX_free(ctx);
+        SSL_CTX_free(ctx);             /* 设置发往客户端的CA证书的默认路径，set default locations for trusted CA certificates */
         fatal_error("Failed to load CA file %s", ca_file);
     }
-
     if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Call to SSL_CTX_set_default_verify_paths failed");
     }
-
     free(ca_file);
 
     if (SSL_CTX_use_certificate_file(ctx, server_cert, SSL_FILETYPE_PEM) != 1) {
-        SSL_CTX_free(ctx);
+        SSL_CTX_free(ctx);             /* 加载服务器的CA和私钥，用于与客户端建立链接 */
         fatal_error("Problem loading certificate from --server-cert=%s", server_cert);
     }
     if (SSL_CTX_use_PrivateKey_file(ctx, server_key, SSL_FILETYPE_PEM) != 1) {
@@ -916,13 +910,12 @@ The following options are not available on Windows systems:\n\
         SSL_CTX_free(ctx);
         fatal_error("Private key %s and certificate %s do not match", server_key, server_cert);
     }
-
     free(server_cert);
     free(server_key);
 
     // Create lock and load private keys
     pk_lock = (uv_rwlock_t *)malloc(sizeof(uv_rwlock_t));
-    if (pk_lock == NULL) {
+    if (pk_lock == NULL) {             /* 创建锁 */
         SSL_CTX_free(ctx);
         fatal_error("Memory error");
     }
@@ -931,32 +924,31 @@ The following options are not available on Windows systems:\n\
         SSL_CTX_free(ctx);
         fatal_error("Can't initialize lock");
     }
+    
     pk_dir = private_key_directory;
-    load_private_keys(ctx);
+    load_private_keys(ctx);            /* 加载托管的私钥 */
 
     // Begin application loop
+    /* 绑定服务器IP及端口 */
     loop = uv_loop_new();
-
     rc = uv_tcp_init(loop, &tcp_server);
     if (rc != 0) {
         SSL_CTX_free(ctx);
         fatal_error("Failed to create TCP server: %s",
                     error_string(rc));
     }
-
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     memset(&(addr.sin_zero), 0, 8);
-
     rc = uv_tcp_bind(&tcp_server, (const struct sockaddr*)&addr, 0);
     if (rc != 0) {
         SSL_CTX_free(ctx);
         fatal_error("Can't bind to port %d: %s", port, error_string(rc));
     }
-
-    tcp_server.data = (void *)ctx;
+    tcp_server.data = (void *)ctx;     /* 私有数据为SSL上下文环境 */
 
     // Make the worker threads
+    /* 启动多工作线程，以监听客户请求；主线程仅监听信号  */
     for (i = 0; i < num_workers; i++) {
         rc = uv_sem_init(&worker[i].semaphore, 0);
         if (rc != 0) {
@@ -979,13 +971,12 @@ The following options are not available on Windows systems:\n\
     // Create a pipe server which will hand the tcp_server handle
     // to threads. Note the 1 in the third parameter of uv_pipe_init:
     // that specifies that this pipe will be used to pass handles.
-
     p = (ipc_server *)malloc(sizeof(ipc_server));
     p->connects = num_workers;
     p->server = &tcp_server;
 
     rc = uv_pipe_init(loop, &p->pipe, 1);
-    if (rc != 0) {
+    if (rc != 0) {                     /* 创建管道，向工作线程传递待监控句柄 */
         SSL_CTX_free(ctx);
         fatal_error("Failed to create parent pipe: %s",
                     error_string(rc));
@@ -996,7 +987,7 @@ The following options are not available on Windows systems:\n\
         fatal_error("Failed to bind pipe to name %s: %s", PIPE_NAME,
                     error_string(rc));
     }
-    p->pipe.data = (void *)p;
+    p->pipe.data = (void *)p;          /* 监听管道，接收客户端连接 */
     rc = uv_listen((uv_stream_t *)&p->pipe, MAX_WORKERS,
                    ipc_connection_cb);
     if (rc != 0) {
@@ -1007,21 +998,21 @@ The following options are not available on Windows systems:\n\
 
     // Pass the tcp_server to all the worker threads and close it
     // here as it is not needed in the main thread.
-
-    for (i = 0; i < num_workers; i++) {
+    for (i = 0; i < num_workers; i++) {/* 触发工作线程，wait1 */
         uv_sem_post(&worker[i].semaphore);
     }
     uv_run(loop, UV_RUN_DEFAULT);
     uv_close((uv_handle_t *)&tcp_server, NULL);
     uv_run(loop, UV_RUN_DEFAULT);
-    for (i = 0; i < num_workers; i++) {
+    for (i = 0; i < num_workers; i++) {/* 等待工作线程，wait2 */
         uv_sem_wait(&worker[i].semaphore);
     }
 
     // The main thread will just wait around for SIGTERM
+    /* 初始化信号处理句柄 */
     if (!test_mode) {
         rc = uv_signal_init(loop, &sigterm_watcher);
-        if (rc != 0) {
+        if (rc != 0) {                 /* 程序终止信号 */
             SSL_CTX_free(ctx);
             fatal_error("Failed to create SIGTERM watcher: %s",
                         error_string(rc));
@@ -1045,7 +1036,7 @@ The following options are not available on Windows systems:\n\
     // The main thread will wait for SIGHUP to reload
     if (!test_mode) {
         rc = uv_signal_init(loop, &sighup_watcher);
-        if (rc != 0) {
+        if (rc != 0) {                 /* 重新加载私钥信号 */
             SSL_CTX_free(ctx);
             fatal_error("Failed to create SIGHUP watcher: %s",
                         error_string(rc));
@@ -1078,13 +1069,13 @@ The following options are not available on Windows systems:\n\
 
     // If in test mode never run this loop. This will cause the program to stop
     // immediately.
-
+    /* 开启事件循环 */
     if (!test_mode) {
         uv_run(loop, UV_RUN_DEFAULT);
     }
 
     // Now clean up all the running threads
-
+    /* 清理资源 */
     for (i = 0; i < num_workers; i++) {
         rc = uv_async_send(&worker[i].stopper);
         if (rc != 0) {

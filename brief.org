@@ -8,12 +8,29 @@
 
 * 代码主线
 #+BEGIN_EXAMPLE
--main()                                       keyless.c
-  -
+服务器段处理流程
+-main()                                       入口，keyless.c
+  -thread_entry()                             工作线程入口
+    -new_connection_cb()                      处理客户端请求, kssl_thread.c
+      -read_cb()                              基于TLS链路，处理客户端请求入口
+        -do_ssl()
+          -parse_header()                     解析自定义协议头
+          -kssl_operate()                     解析自定义协议体
+            -parse_message_payload()
+            -private_key_operation()          执行客户端请求
+              -RSA_private_decrypt()
+              -RSA_sign()
+        -write_queued_messages()              应答
+          -SSL_write()
 #+END_EXAMPLE
 
+#+BEGIN_EXAMPLE
+客户端处理流程
+-main()                                       入口，
+#+END_EXAMPLE
 
 * 参考
+ - <<SSL与TLS>>
  - [[https://github.com/cloudflare/keyless][cloudflare keyless]]
 
 

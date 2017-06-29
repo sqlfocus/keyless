@@ -13,11 +13,11 @@
 #include <syslog.h>
 #endif
 
-int silent = 0;
-int verbose = 0;
+int silent = 0;      /* 是否忽略终端打印 */
+int verbose = 0;     /* 是否输出非LOG_ERR信息 */
 
 #if PLATFORM_WINDOWS == 0
-int use_syslog = 0;
+int use_syslog = 0;  /* 是否使用syslog记录日志 */
 #endif
 
 // write_log: call to log a message. If syslog is not enabled then error

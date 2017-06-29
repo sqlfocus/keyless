@@ -39,67 +39,63 @@ extern uv_rwlock_t *pk_lock;
 // An element in the queue of buffers to send
 
 typedef struct {
-  BYTE *start; // Start of the buffer (used for free())
-  BYTE *send;  // Pointer to portion of buffer to send
-  int len;     // Remaining number of bytes to send
+    BYTE *start; // Start of the buffer (used for free())
+    BYTE *send;  // Pointer to portion of buffer to send
+    int len;     // Remaining number of bytes to send
 } queued;
 
 // This is the state of an individual SSL connection and is used for buffering
 // of data received by SSL_read
-
 typedef struct _connection_state {
-  // Used to implement a doubly-linked list of connections that are
-  // currently active. This is needed for cleanup on shutdown.
+    // Used to implement a doubly-linked list of connections that are
+    // currently active. This is needed for cleanup on shutdown.
 
-  struct _connection_state **prev;
-  struct _connection_state *next;
+    struct _connection_state **prev;
+    struct _connection_state *next;
 
-  SSL *ssl;
-  BYTE *start;   // Pointer to buffer into which SSL_read data is placed
-  BYTE *current; // Pointer into start where SSL_read should write to
-  int need;      // Number of bytes needed before start is considered 'full'
-  int state;     // Current state of the connection (see defines above)
-  BYTE wire_header[KSSL_HEADER_SIZE]; // Complete header once read from wire
-  kssl_header header; // Parsed version of the header
-  BYTE *payload; // Allocated for payload when necessary
-  queued q[QUEUE_LENGTH];
+    SSL *ssl;      /* 监听链路对应的SSL结构 */
+    BYTE *start;   // Pointer to buffer into which SSL_read data is placed
+    BYTE *current; // Pointer into start where SSL_read should write to
+    int need;      // 每次解析前需要读取的字节数，Number of bytes needed before start is considered 'full'
+    int state;     // 链路状态机，Current state of the connection (see defines above)
+    BYTE wire_header[KSSL_HEADER_SIZE]; // 自定义协议头，Complete header once read from wire
+    kssl_header header; // 自定义协议头解析结果，Parsed version of the header
+    BYTE *payload; // 自定义协议体，Allocated for payload when necessary
+    queued q[QUEUE_LENGTH];   /* 发送缓存队列 */
 
-  // File descriptor of the file this connection is on
+    // File descriptor of the file this connection is on
 
-  int fd;
+    int fd;
 
-  // These implement a circular buffer in q. qw points to the next entry
-  // in the q that can be used to queue a buffer to send. qr points to
-  // the next entry to be sent.
-  //
-  // if qr == qw then the buffer is empty.
+    // These implement a circular buffer in q. qw points to the next entry
+    // in the q that can be used to queue a buffer to send. qr points to
+    // the next entry to be sent.
+    //
+    // if qr == qw then the buffer is empty.
+    int qr;
+    int qw;
 
-  int qr;
-  int qw;
+    // Back link just used when cleaning up. This points to the TCP
+    // connection that points to this connection_state through its data
+    // pointer
+    uv_tcp_t *tcp;            /* 客户端信息 */
 
-  // Back link just used when cleaning up. This points to the TCP
-  // connection that points to this connection_state through its data
-  // pointer
+    // Pointers to the memory BIO used for communication with OpenSSL
 
-  uv_tcp_t *tcp;
+    BIO *read_bio;
+    BIO *write_bio;
 
-  // Pointers to the memory BIO used for communication with OpenSSL
-
-  BIO *read_bio;
-  BIO *write_bio;
-
-  // Set to true when the TLS connection is set up
-
-  int connected;
+    // Set to true when the TLS connection is set up
+    int connected;
 } connection_state;
 
 typedef struct {
-  uv_sem_t    semaphore;    // Semaphore used in thread startup
-  uv_thread_t thread;       // The thread handle
-  uv_tcp_t    server;       // The TCP server listen handle
-  uv_async_t  stopper;      // Used to terminate threads
-  SSL_CTX *   ctx;          // The OpenSSL context
-  connection_state *active; // Active connection list
+    uv_sem_t    semaphore;    // Semaphore used in thread startup
+    uv_thread_t thread;       // The thread handle
+    uv_tcp_t    server;       // The TCP server listen handle
+    uv_async_t  stopper;      // Used to terminate threads
+    SSL_CTX *   ctx;          // The OpenSSL context
+    connection_state *active; // 客户端链路列表，Active connection list
 } worker_data;
 
 #endif // INCLUDED_KSSL_THREAD
