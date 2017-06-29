@@ -611,10 +611,10 @@ void kssl_op_pong(connection *c)
     req.is_payload_set = 1;
     req.opcode = KSSL_OP_PONG;
     req.payload_len = 0;
-    h = kssl(c->ssl, &echo0, &req);
+    h = kssl(c->ssl, &echo0, &req);                  /* 发送请求，并等待结果 */
     test_assert(h->id == echo0.id);
     test_assert(h->version_maj == KSSL_VERSION_MAJ);
-    parse_message_payload(h->data, h->length, &resp);
+    parse_message_payload(h->data, h->length, &resp);/* 等待结果，并检查 */
     test_assert(resp.opcode == KSSL_OP_ERROR);
     test_assert(resp.payload_len == 1);
     test_assert(resp.payload[0] == KSSL_ERROR_UNEXPECTED_OPCODE);
@@ -1401,6 +1401,7 @@ void thread_pipeline_ecdsa_sign(void *ptr)
     ssl_disconnect(c1);
 }
 
+/* 入口 */
 int main(int argc, char *argv[])
 {
     int port = -1;
@@ -1490,7 +1491,7 @@ int main(int argc, char *argv[])
             break;
         }
     }
-
+    /* 检查必须配置的选项 */
     if (port == -1) {
         fatal_error("The --port parameter must be specified with the connect port");
     }
@@ -1514,10 +1515,12 @@ int main(int argc, char *argv[])
         fatal_error("Could not look up address of localhost");
     }
 
+    /* SSL库初始化 */
     SSL_library_init();
     SSL_load_error_strings();
     method = TLSv1_2_client_method();
 
+    /* 获取RSA公钥 */
     bio = BIO_new(BIO_s_file());
     BIO_read_filename(bio, rsa_pubkey_path);
     evp_pubkey_tmp = PEM_read_bio_PUBKEY(bio, 0, 0, 0);
@@ -1528,11 +1531,12 @@ int main(int argc, char *argv[])
     if (!rsa_pubkey) {
         fatal_error("Error reading RSA pubkey");
     }
-
     BIO_free(bio);
     if (!rsa_pubkey) {
         ssl_error();
     }
+    
+    /* 获取ECDSA公钥 */
     bio = BIO_new(BIO_s_file());
     BIO_read_filename(bio, ecdsa_pubkey_path);
     evp_pubkey_tmp = PEM_read_bio_PUBKEY(bio, 0, 0, 0);
@@ -1540,18 +1544,16 @@ int main(int argc, char *argv[])
         fatal_error("Error reading EC pubkey");
     }
     ecdsa_pubkey = EVP_PKEY_get1_EC_KEY(evp_pubkey_tmp);
-
     BIO_free(bio);
     if (!ecdsa_pubkey) {
         ssl_error();
     }
 
+    /* 创建SSL环境 */
     ctx = SSL_CTX_new(method);
-
     if (!ctx) {
         ssl_error();
     }
-
     if (SSL_CTX_set_cipher_list(ctx, cipher_list) == 0) {
         SSL_CTX_free(ctx);
         fatal_error("Failed to set cipher list: %s", cipher_list);
@@ -1562,40 +1564,36 @@ int main(int argc, char *argv[])
         SSL_CTX_free(ctx);
         fatal_error("ECDSA curve not present");
     }
-
     EC_KEY *ecdh = EC_KEY_new_by_curve_name(nid);
     if (NULL == ecdh) {
         SSL_CTX_free(ctx);
         fatal_error("ECDSA new curve error");
     }
-
     if(SSL_CTX_set_tmp_ecdh(ctx, ecdh) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Call to SSL_CTX_set_tmp_ecdh failed");
     }
-
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, 0);
 
+    /* 加载CA证书 */
     if (SSL_CTX_load_verify_locations(ctx, ca_file, 0) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Failed to load CA file %s", ca_file);
     }
-
     if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Call to SSL_CTX_set_default_verify_paths failed");
     }
 
+    /* 加载到本端认证所需证书及密钥 */
     if (SSL_CTX_use_certificate_file(ctx, client_cert, SSL_FILETYPE_PEM) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Failed to load client certificate from %s", client_cert);
     }
-
     if (SSL_CTX_use_PrivateKey_file(ctx, client_key, SSL_FILETYPE_PEM) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("Failed to load client private key from %s", client_key);
     }
-
     if (SSL_CTX_check_private_key(ctx) != 1) {
         SSL_CTX_free(ctx);
         fatal_error("SSL_CTX_check_private_key failed");
@@ -1603,17 +1601,18 @@ int main(int argc, char *argv[])
 
     // If --alive set then just check connectivity to the kssl_server by
     // sending an receiving a ping/pong
-  
+    /* 简单的测试链路 */
     if (alive) {
-        c0 = ssl_connect(ctx, port);
+        c0 = ssl_connect(ctx, port);   /* 连接 */
         kssl_op_pong(c0);
-        ssl_disconnect(c0);
+        ssl_disconnect(c0);            /* 断开链接 */
         SSL_CTX_free(ctx);
 
         return 0;
     }
 
     // Use a new connection for each test
+    /* 其他测试用例 */
     c0 = ssl_connect(ctx, port);
     kssl_bad_opcode(c0);
     ssl_disconnect(c0);
@@ -1671,7 +1670,6 @@ int main(int argc, char *argv[])
     ssl_disconnect(c0);
 
     // Use a single connection to perform tests in sequence
-
     c = ssl_connect(ctx, port);
     kssl_bad_opcode(c);
     kssl_op_pong(c);
@@ -1690,7 +1688,6 @@ int main(int argc, char *argv[])
     ssl_disconnect(c);
 
     // Make two connections and perform interleaved tests
-
     c1 = ssl_connect(ctx, port);
     c2 = ssl_connect(ctx, port);
     kssl_bad_opcode(c1);
@@ -1725,7 +1722,6 @@ int main(int argc, char *argv[])
     ssl_disconnect(c1);
 
     // Make two connections and perform interleaved tests
-
     c1 = ssl_connect(ctx, port);
     c2 = ssl_connect(ctx, port);
     kssl_bad_opcode(c1);

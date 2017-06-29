@@ -26,7 +26,8 @@
 
 #+BEGIN_EXAMPLE
 客户端处理流程
--main()                                       入口，
+-main()                                       入口，testclient.c
+  -
 #+END_EXAMPLE
 
 * 参考
