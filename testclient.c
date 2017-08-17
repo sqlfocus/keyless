@@ -177,7 +177,7 @@ void digest_public_rsa(RSA *key, BYTE *digest)
 
     ctx = EVP_MD_CTX_create();
     EVP_DigestInit_ex(ctx, EVP_sha256(), 0);
-    hex = BN_bn2hex(key->n);
+    hex = BN_bn2hex(key->n);  /* 摘要公钥->n，modulus */
     EVP_DigestUpdate(ctx, hex, strlen(hex));
     EVP_DigestFinal_ex(ctx, digest, 0);
     EVP_MD_CTX_destroy(ctx);
@@ -346,18 +346,22 @@ kssl_header *kssl(SSL *ssl, kssl_header *k, kssl_operation *r)
     kssl_header h;
     kssl_header *to_return;
 
+    /* 构造报文，结果存储在req，长度为req_len */
     flatten_operation(k, r, &req, &req_len);
 
     dump_header(k, "send");
     dump_request(r);
 
+    /* 发送到服务器 */
     n = SSL_write(ssl, req, req_len);
     if (n != req_len) {
         fatal_error("Failed to send KSSL header");
     }
 
+    /* 释放请求内存 */
     free(req);
 
+    /* 读取回应头 */
     while (1) {
         n = SSL_read(ssl, buf, KSSL_HEADER_SIZE);
         if (n <= 0) {
@@ -391,7 +395,7 @@ kssl_header *kssl(SSL *ssl, kssl_header *k, kssl_operation *r)
     to_return = (kssl_header *)malloc(sizeof(kssl_header));
     memcpy(to_return, &h, sizeof(kssl_header));
 
-
+    /* 读取回应结果 */
     if (h.length > 0) {
         BYTE *payload = (BYTE *)malloc(h.length);
         while (1) {
@@ -422,6 +426,7 @@ kssl_header *kssl(SSL *ssl, kssl_header *k, kssl_operation *r)
         to_return->data = payload;
     }
 
+    /* 返回回应结果 */
     return to_return;
 }
 
@@ -780,6 +785,7 @@ void kssl_op_ping_bad_version(connection *c)
     ok(h);
 }
 
+/* 和keyless服务器通信，RSA加密 */
 void kssl_op_rsa_decrypt(connection *c, RSA *rsa_pubkey)
 {
     static int count = 0;
@@ -789,23 +795,30 @@ void kssl_op_rsa_decrypt(connection *c, RSA *rsa_pubkey)
     kssl_header *h;
     int size;
     test("KSSL_OP_RSA_DECRYPT (%p)", c);
+    
     decrypt.version_maj = KSSL_VERSION_MAJ;
     decrypt.id = 0x1234567a;
+    
     zero_operation(&req);
     req.is_opcode_set = 1;
     req.is_payload_set = 1;
     req.is_digest_set = 1;
     req.is_ip_set = 1;
+    
     req.ip = ipv6;
     req.ip_len = 16;
+    
     req.payload = malloc(RSA_size(rsa_pubkey));
     req.payload_len = RSA_size(rsa_pubkey);
+    
     req.digest = malloc(KSSL_DIGEST_SIZE);
     digest_public_rsa(rsa_pubkey, req.digest);
+    
     req.opcode = KSSL_OP_RSA_DECRYPT;
+    
+    /* 公钥加密kryptos2, 结果存放到->payload */
     sprintf(kryptos2, "%02x It was totally invisible, how's that possible?", count);
     count += 1;
-
     size = RSA_public_encrypt(strlen(kryptos2), (unsigned char *)kryptos2,
                               (unsigned char *)req.payload,
                               rsa_pubkey, RSA_PKCS1_PADDING);
@@ -813,14 +826,20 @@ void kssl_op_rsa_decrypt(connection *c, RSA *rsa_pubkey)
         fatal_error("Failed to RSA encrypt");
     }
 
+    /* 发送到keyless服务器；并读取回应结果 */
     h = kssl(c->ssl, &decrypt, &req);
     test_assert(h->id == decrypt.id);
     test_assert(h->version_maj == KSSL_VERSION_MAJ);
+
+    /* 解析回应内容 */
     parse_message_payload(h->data, h->length, &resp);
+    
     test_assert(resp.opcode == KSSL_OP_RESPONSE);
     test_assert(resp.payload_len == strlen(kryptos2));
     test_assert(strncmp((char *)resp.payload, kryptos2, strlen(kryptos2)) == 0);
+    
     ok(h);
+    
     free(req.payload);
     free(req.digest);
 }
@@ -1224,21 +1243,23 @@ connection *ssl_connect(SSL_CTX *ctx, int port)
     int rc;
     connection *c = (connection *)calloc(1, sizeof(connection));
 
+    /* socket() */
     c->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (c->fd == -1) {
         fatal_error("Can't create TCP socket");
     }
 
+    /* connect() */
     memset(&addr, 0, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = ((struct in_addr*)(localhost->h_addr_list[0]))->s_addr;
     memset(&(addr.sin_zero), 0, 8);
-
     if (connect(c->fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) == -1) {
         fatal_error("Failed to connect to keyserver on port %d", port);
     }
 
+    /* 创建SSL，并TLS连接服务器 */
     c->ssl = SSL_new(ctx);
     if (!c->ssl) {
         fatal_error("Failed to create new SSL context");
@@ -1401,7 +1422,7 @@ void thread_pipeline_ecdsa_sign(void *ptr)
     ssl_disconnect(c1);
 }
 
-/* 入口 */
+/* testclient历程入口 */
 int main(int argc, char *argv[])
 {
     int port = -1;
@@ -1637,6 +1658,7 @@ int main(int argc, char *argv[])
     kssl_op_ping_bad_version(c0);
     ssl_disconnect(c0);
 
+    /* 测试RSA解密，可用来仿照写keyless示例的客户端 */
     c0 = ssl_connect(ctx, port);
     kssl_op_rsa_decrypt(c0, rsa_pubkey);
     ssl_disconnect(c0);
